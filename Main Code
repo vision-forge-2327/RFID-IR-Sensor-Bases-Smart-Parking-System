@@ -1,0 +1,173 @@
+#include <WiFi.h>
+#include <WebServer.h>
+#include <SPI.h>
+#include <MFRC522.h>
+
+// ---------------- WIFI ----------------
+const char* ssid = "MrUnknown";
+const char* password = "00000000";
+
+// ---------------- IR SENSORS ----------------
+const int irPins[3] = {33, 34, 35};
+const int slotLEDs[3] = {13, 12, 14};
+bool slotStatus[3];
+
+// ---------------- RFID ----------------
+#define SS_PIN 5
+#define RST_PIN 22
+
+MFRC522 rfid(SS_PIN, RST_PIN);
+
+// ----------- VEHICLE STRUCT -----------
+struct Vehicle {
+  String uid;
+  bool inside;
+};
+
+// Add your 3 authorized cards
+Vehicle vehicles[] = {
+  {"612D493C", false},
+  {"6367EE0C", false},
+  {"A1B2C3D4", false}   // Replace with real UID
+};
+
+const int totalCards = sizeof(vehicles) / sizeof(vehicles[0]);
+
+WebServer server(80);
+
+int availableSlots = 3;
+
+// -------- RFID READ FUNCTION ----------
+String readRFID() {
+  if (!rfid.PICC_IsNewCardPresent()) return "";
+  if (!rfid.PICC_ReadCardSerial()) return "";
+
+  String uidString = "";
+  for (byte i = 0; i < rfid.uid.size; i++) {
+    if (rfid.uid.uidByte[i] < 0x10) uidString += "0";
+    uidString += String(rfid.uid.uidByte[i], HEX);
+  }
+
+  uidString.toUpperCase();
+  rfid.PICC_HaltA();
+  return uidString;
+}
+
+// -------- WEB PAGE ----------
+String getHTML() {
+
+  String html = "<!DOCTYPE html><html><head><meta charset='UTF-8'>";
+  html += "<title>Smart Parking</title>";
+  html += "<style>body{text-align:center;font-family:sans-serif;} ";
+  html += ".slot{margin:10px;padding:10px;border:1px solid #ccc;display:inline-block;width:150px;} ";
+  html += ".full{background:#ffdddd;} .empty{background:#ddffdd;}</style></head><body>";
+
+  html += "<h1>Smart Parking System</h1>";
+  html += "<h2>Available Slots: " + String(availableSlots) + "</h2>";
+
+  for (int i = 0; i < 3; i++) {
+    html += "<div class='slot ";
+    html += (slotStatus[i] ? "full'>" : "empty'>");
+    html += "Slot " + String(i + 1) + ": ";
+    html += (slotStatus[i] ? "<b>FULL</b>" : "<b>EMPTY</b>");
+    html += "</div>";
+  }
+
+  html += "<h3>Vehicles Inside:</h3>";
+
+  for (int i = 0; i < totalCards; i++) {
+    if (vehicles[i].inside) {
+      html += "<p>" + vehicles[i].uid + " is inside</p>";
+    }
+  }
+
+  html += "<script>setTimeout(()=>{location.reload();},5000);</script>";
+  html += "</body></html>";
+
+  return html;
+}
+
+void handleRoot() {
+  server.send(200, "text/html", getHTML());
+}
+
+// ---------------- SETUP ----------------
+void setup() {
+
+  Serial.begin(115200);
+
+  SPI.begin();
+  rfid.PCD_Init();
+
+  for (int i = 0; i < 3; i++) {
+    pinMode(irPins[i], INPUT);
+    pinMode(slotLEDs[i], OUTPUT);
+  }
+
+  WiFi.begin(ssid, password);
+  Serial.print("Connecting");
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println("\nConnected IP:");
+  Serial.println(WiFi.localIP());
+
+  server.on("/", handleRoot);
+  server.begin();
+}
+
+// ---------------- LOOP ----------------
+void loop() {
+
+  // Update Slot Count
+  availableSlots = 0;
+
+  for (int i = 0; i < 3; i++) {
+    slotStatus[i] = (digitalRead(irPins[i]) == LOW);
+    digitalWrite(slotLEDs[i], slotStatus[i]);
+
+    if (!slotStatus[i]) availableSlots++;
+  }
+
+  // RFID Scan
+  String uid = readRFID();
+
+  if (uid != "") {
+
+    Serial.println("Card UID: " + uid);
+
+    bool found = false;
+
+    for (int i = 0; i < totalCards; i++) {
+
+      if (uid == vehicles[i].uid) {
+
+        found = true;
+
+        if (!vehicles[i].inside && availableSlots > 0) {
+          vehicles[i].inside = true;
+          Serial.println("ENTRY GRANTED for " + uid);
+        }
+        else if (vehicles[i].inside) {
+          vehicles[i].inside = false;
+          Serial.println("EXIT GRANTED for " + uid);
+        }
+        else {
+          Serial.println("Parking Full!");
+        }
+
+        delay(2000);
+        break;
+      }
+    }
+
+    if (!found) {
+      Serial.println("Unauthorized Card");
+    }
+  }
+
+  server.handleClient();   // 🔥 VERY IMPORTANT
+}
