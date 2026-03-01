@@ -1,3 +1,8 @@
+Batch ID's:
+1)2300049178
+2)2300049165
+3)2300049176
+
 🚗 RFID & IR Sensor Based Smart Parking System
 An IoT-based Smart Parking System designed to automate vehicle entry, exit, and slot monitoring using RFID authentication and IR sensor-based slot detection. This system reduces manual intervention, prevents unauthorized access, and improves parking efficiency in commercial, residential, and institutional environments.
 
